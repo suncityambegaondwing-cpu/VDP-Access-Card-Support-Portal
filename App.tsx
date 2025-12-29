@@ -41,6 +41,7 @@ const App: React.FC = () => {
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [matchedRecord, setMatchedRecord] = useState<ResidentRecord | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminTower, setAdminTower] = useState<string | null>(null);
   const [allTickets, setAllTickets] = useState<SupportTicket[]>([]);
   const [isLoadingTickets, setIsLoadingTickets] = useState(false);
   const [ticketError, setTicketError] = useState<string | null>(null);
@@ -69,11 +70,15 @@ const App: React.FC = () => {
 
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (
-      (loginData.username === 'adminC' && loginData.password === 'Sun$892') ||
-      (loginData.username === 'AdminD' && loginData.password === '786$cityD')
-    ) {
+    if (loginData.username === 'adminC' && loginData.password === 'Sun$892') {
       setIsAdmin(true);
+      setAdminTower('C');
+      setView('admin');
+      loadTickets();
+      setValidationError(null);
+    } else if (loginData.username === 'AdminD' && loginData.password === '786$cityD') {
+      setIsAdmin(true);
+      setAdminTower('D');
       setView('admin');
       loadTickets();
       setValidationError(null);
@@ -96,22 +101,31 @@ const App: React.FC = () => {
     }
   };
 
-  const maskName = (firstName: string, lastName: string) => {
-    const f = (firstName || '').trim();
-    const l = (lastName || '').trim();
-    const firstPart = f.length > 4 ? f.substring(0, 4) : f;
-    const lastPart = l.length > 2 ? l.substring(l.length - 2) : l;
-    return `${firstPart}...${lastPart}`.toUpperCase();
-  };
-
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     let { name, value } = e.target;
-    // Force Uppercase for specific inputs as requested
     if (name === 'towerBlock' || name === 'fullName') {
       value = value.toUpperCase();
     }
     setFormData(prev => ({ ...prev, [name]: value }));
     if (validationError) setValidationError(null);
+  };
+
+  const handleIssueTypeSelect = (type: IssueType) => {
+    // Mapping requirement: 
+    // VDP -> Medium (Intermediate)
+    // Access Card or Both -> Critical (Crucial/Urgent)
+    let urgency = Urgency.MEDIUM;
+    if (type === IssueType.ACCESS_CARD || type === IssueType.BOTH) {
+      urgency = Urgency.CRITICAL;
+    } else if (type === IssueType.VDP) {
+      urgency = Urgency.MEDIUM;
+    }
+    
+    setFormData(prev => ({ 
+      ...prev, 
+      issueType: type,
+      urgency: urgency
+    }));
   };
 
   const nextStep = () => {
@@ -126,8 +140,12 @@ const App: React.FC = () => {
       );
       if (record) {
         setMatchedRecord(record);
-        const masked = maskName(record.firstName, record.lastName);
-        setFormData(prev => ({ ...prev, fullName: masked }));
+        // Requirement: Show complete name of resident
+        const fullName = [record.firstName, record.middleName, record.lastName]
+          .filter(part => part && part.trim() !== '')
+          .join(' ')
+          .toUpperCase();
+        setFormData(prev => ({ ...prev, fullName }));
       } else {
         setMatchedRecord(null);
       }
@@ -156,7 +174,8 @@ const App: React.FC = () => {
     const newTicket: SupportTicket = {
       ...(formData as SupportTicket),
       id: `VDP-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
-      submittedAt: new Date().toLocaleString()
+      submittedAt: new Date().toLocaleString(),
+      email: '' 
     };
     const syncSuccess = await syncToGoogleSheet(newTicket);
     if (syncSuccess) {
@@ -173,13 +192,24 @@ const App: React.FC = () => {
     }
   };
 
+  const filteredTickets = allTickets.filter(ticket => {
+    if (!adminTower) return true;
+    const towerStr = (ticket.towerBlock || '').toUpperCase();
+    return towerStr === adminTower || 
+           towerStr.includes(` ${adminTower}`) || 
+           towerStr.startsWith(`${adminTower} `) || 
+           towerStr.includes(`-${adminTower}`) || 
+           towerStr.includes(`${adminTower}-`) ||
+           towerStr.includes(`TOWER ${adminTower}`);
+  });
+
   const handleExportCSV = () => {
-    if (allTickets.length === 0) {
-      alert("No data available to export.");
+    if (filteredTickets.length === 0) {
+      alert("No data available to export for your designated tower.");
       return;
     }
-    const csvContent = generateCSV(allTickets);
-    downloadCSV(csvContent, `vdp_tickets_${new Date().toISOString().split('T')[0]}.csv`);
+    const csvContent = generateCSV(filteredTickets);
+    downloadCSV(csvContent, `vdp_tickets_tower_${adminTower}_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
   if (isLoadingData) {
@@ -198,7 +228,7 @@ const App: React.FC = () => {
       <Header 
         onAdminClick={() => { setView('login'); setValidationError(null); }} 
         isAdmin={isAdmin} 
-        onLogout={() => { setIsAdmin(false); setView('form'); }} 
+        onLogout={() => { setIsAdmin(false); setAdminTower(null); setView('form'); }} 
       />
       
       <main className="max-w-5xl mx-auto px-4 mt-8">
@@ -229,8 +259,8 @@ const App: React.FC = () => {
           <div className="animate-in fade-in duration-500 space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-3xl font-black text-slate-800 tracking-tight">Management Dashboard</h2>
-                <p className="text-slate-500 text-sm mt-1">Real-time view of resident service applications.</p>
+                <h2 className="text-3xl font-black text-slate-800 tracking-tight">Tower {adminTower} Dashboard</h2>
+                <p className="text-slate-500 text-sm mt-1">Viewing service requests filtered specifically for your tower.</p>
               </div>
               <div className="flex gap-3">
                 <button onClick={loadTickets} disabled={isLoadingTickets} className="bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-50 disabled:opacity-50 transition-all">
@@ -239,7 +269,7 @@ const App: React.FC = () => {
                   </svg>
                   {isLoadingTickets ? 'Loading...' : 'Refresh'}
                 </button>
-                <button onClick={handleExportCSV} disabled={allTickets.length === 0} className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg shadow-emerald-200 hover:bg-emerald-700 disabled:bg-slate-300 disabled:shadow-none transition-all">
+                <button onClick={handleExportCSV} disabled={filteredTickets.length === 0} className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg shadow-emerald-200 hover:bg-emerald-700 disabled:bg-slate-300 disabled:shadow-none transition-all">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                   </svg>
@@ -255,7 +285,7 @@ const App: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-sm font-bold text-rose-800">Connection Error</p>
-                  <p className="text-xs text-rose-600/80 mt-1">{ticketError}. Check if your Google Apps Script is deployed for "Anyone".</p>
+                  <p className="text-xs text-rose-600/80 mt-1">{ticketError}.</p>
                   <button onClick={loadTickets} className="mt-2 text-xs font-black uppercase text-rose-800 hover:underline">Retry Connection</button>
                 </div>
               </div>
@@ -278,48 +308,62 @@ const App: React.FC = () => {
                         <td colSpan={4} className="px-6 py-24 text-center">
                           <div className="flex flex-col items-center gap-3">
                             <div className="w-10 h-10 border-3 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
-                            <span className="text-slate-400 text-xs font-medium tracking-wide">Retrieving encrypted data...</span>
+                            <span className="text-slate-400 text-xs font-medium tracking-wide">Retrieving data for Tower {adminTower}...</span>
                           </div>
                         </td>
                       </tr>
-                    ) : allTickets.length === 0 ? (
+                    ) : filteredTickets.length === 0 ? (
                       <tr>
                         <td colSpan={4} className="px-6 py-24 text-center">
                           <div className="flex flex-col items-center gap-2 text-slate-300">
                             <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
-                            <p className="text-sm italic font-medium">No records found matching your current credentials.</p>
+                            <p className="text-sm italic font-medium">No records found for Tower {adminTower}.</p>
                           </div>
                         </td>
                       </tr>
                     ) : (
-                      allTickets.map((ticket, i) => (
+                      filteredTickets.map((ticket, i) => (
                         <tr key={ticket.id || i} className="hover:bg-slate-50/50 transition-colors group">
-                          <td className="px-6 py-5">
-                            <div className="text-xs font-black text-slate-800">{ticket.id}</div>
-                            <div className="text-[10px] text-slate-400 mt-1 font-medium">{ticket.submittedAt}</div>
+                          <td className="px-6 py-5 align-top">
+                            <div className="text-xs font-black text-slate-800">{ticket.id || 'N/A'}</div>
+                            <div className="text-[10px] text-slate-400 mt-1 font-medium leading-tight">{ticket.submittedAt || 'Unknown Date'}</div>
                           </td>
-                          <td className="px-6 py-5">
-                            <div className="text-xs font-bold text-slate-700">{ticket.towerBlock} • {ticket.unitNumber}</div>
-                            <div className="text-[10px] text-slate-400 font-medium group-hover:text-slate-600 transition-colors uppercase">{ticket.fullName}</div>
-                            <div className="text-[10px] text-slate-400 font-medium">{ticket.contactNumber}</div>
+                          <td className="px-6 py-5 align-top">
+                            <div className="text-xs font-bold text-slate-700">
+                              {ticket.towerBlock && ticket.unitNumber ? (
+                                <>{ticket.towerBlock} • {ticket.unitNumber}</>
+                              ) : (
+                                ticket.towerBlock || ticket.unitNumber || 'Unknown Location'
+                              )}
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-medium group-hover:text-slate-600 transition-colors uppercase mt-1">
+                              {ticket.fullName || 'No Name Provided'}
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-medium">{ticket.contactNumber || 'No Phone'}</div>
                           </td>
-                          <td className="px-6 py-5 max-w-md">
-                            <div className="flex gap-2 mb-1.5">
-                              <span className="text-[9px] font-black bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 uppercase">{ticket.issueType}</span>
+                          <td className="px-6 py-5 align-top max-w-md">
+                            <div className="flex flex-wrap gap-2 mb-2">
+                              <span className="text-[9px] font-black bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 uppercase">
+                                {ticket.issueType || 'Unspecified Device'}
+                              </span>
                               <span className={`text-[9px] font-black px-2 py-0.5 rounded border uppercase ${
-                                (ticket.urgency || '').includes('High') ? 'bg-rose-50 text-rose-600 border-rose-100' : 
+                                (ticket.urgency || '').includes('High') || (ticket.urgency || '').includes('Critical') ? 'bg-rose-50 text-rose-600 border-rose-100' : 
                                 (ticket.urgency || '').includes('Medium') ? 'bg-amber-50 text-amber-600 border-amber-100' : 
                                 'bg-sky-50 text-sky-600 border-sky-100'
                               }`}>
                                 {ticket.urgency ? ticket.urgency.split(' - ')[0] : 'Normal'}
                               </span>
                             </div>
-                            <p className="text-[11px] text-slate-500 leading-relaxed line-clamp-2">{ticket.description}</p>
+                            <div className="bg-slate-50 border border-slate-100 p-2.5 rounded-lg">
+                              <p className="text-[11px] text-slate-600 leading-relaxed font-medium">
+                                {ticket.description || 'No problem description provided.'}
+                              </p>
+                            </div>
                           </td>
-                          <td className="px-6 py-5">
+                          <td className="px-6 py-5 align-top">
                              <div className="flex items-center gap-2">
                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                               <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-tighter">Received</span>
+                               <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-tighter">Verified</span>
                              </div>
                           </td>
                         </tr>
@@ -414,7 +458,7 @@ const App: React.FC = () => {
                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider font-black">Device Category</label>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {Object.values(IssueType).map(type => (
-                            <button key={type} type="button" onClick={() => setFormData(prev => ({ ...prev, issueType: type }))} className={`px-4 py-4 text-sm font-black rounded-xl border flex items-center gap-3 transition-all ${formData.issueType === type ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-200' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}>
+                            <button key={type} type="button" onClick={() => handleIssueTypeSelect(type)} className={`px-4 py-4 text-sm font-black rounded-xl border flex items-center gap-3 transition-all ${formData.issueType === type ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-200' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}>
                               <div className={`w-2.5 h-2.5 rounded-full ${formData.issueType === type ? 'bg-white' : 'bg-slate-300'}`}></div>
                               {type}
                             </button>

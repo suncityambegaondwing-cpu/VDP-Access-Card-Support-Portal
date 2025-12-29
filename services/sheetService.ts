@@ -1,4 +1,4 @@
-import { SupportTicket } from "../types";
+import { SupportTicket, IssueType, Urgency } from "../types";
 
 const SPREADSHEET_ID = "10Ff2m3vI26Vg8nR-_uY_MNSNQ8-2t0ADfWgP-UUmcZE";
 // Google Apps Script Web App URL
@@ -26,21 +26,17 @@ export const syncToGoogleSheet = async (ticket: SupportTicket): Promise<boolean>
 
 /**
  * Fetches all tickets from the Google Sheet.
- * Note: Requires the doGet() function in Apps Script to be deployed correctly.
- * IMPORTANT: The script MUST be deployed with "Who has access: Anyone".
+ * Maps spreadsheet header-based keys to the local SupportTicket interface.
  */
 export const fetchTickets = async (): Promise<SupportTicket[]> => {
   try {
     console.debug("Initializing fetch from Google Apps Script...");
     
-    // Using a simple fetch with default mode (cors) for GET requests.
-    // Google Apps Script requires redirect following.
     const response = await fetch(SCRIPT_URL, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
       },
-      // redirect: 'follow' is default, but we specify it for clarity
       redirect: 'follow',
     });
 
@@ -48,21 +44,34 @@ export const fetchTickets = async (): Promise<SupportTicket[]> => {
       throw new Error(`Server returned status ${response.status}`);
     }
 
-    const data = await response.json();
+    const rawData = await response.json();
     
-    if (!Array.isArray(data)) {
+    if (!Array.isArray(rawData)) {
       console.warn("Data received is not an array. Check your doGet() return value.");
       return [];
     }
 
+    // Map spreadsheet keys (which often contain spaces or different casing) back to local interface
+    const mappedTickets: SupportTicket[] = rawData.map((item: any) => ({
+      id: item.id || item.ID || item["Ticket ID"] || "N/A",
+      fullName: item.fullName || item["Full Name"] || item.name || "Unknown",
+      unitNumber: item.unitNumber || item["Unit Number"] || item.flat || "",
+      towerBlock: item.towerBlock || item["Tower/Block"] || item.tower || "",
+      contactNumber: item.contactNumber || item["Contact Number"] || item.phone || "",
+      email: item.email || item.Email || "",
+      issueType: (item.issueType || item["Issue Type"] || IssueType.OTHER) as IssueType,
+      urgency: (item.urgency || item.Urgency || Urgency.MEDIUM) as Urgency,
+      description: item.description || item.Description || item["Issue Description"] || "",
+      submittedAt: item.submittedAt || item["Submitted At"] || item.date || new Date().toLocaleString()
+    }));
+
     // Reverse to show the most recent submissions at the top
-    return [...data].reverse();
+    return mappedTickets.reverse();
   } catch (error: any) {
     console.error("Critical Fetch Error:", error);
     
-    // If we get "Failed to fetch", it's usually a browser-level CORS block
     if (error.message === 'Failed to fetch') {
-      throw new Error("CORS/Network error. Check if 'Anyone' has access in Apps Script deployment.");
+      throw new Error("CORS/Network error. Ensure Apps Script is deployed for 'Anyone'.");
     }
     throw error;
   }
