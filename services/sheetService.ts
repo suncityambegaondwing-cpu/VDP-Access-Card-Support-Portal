@@ -27,18 +27,20 @@ export const syncToGoogleSheet = async (ticket: SupportTicket): Promise<boolean>
 /**
  * Fetches all tickets from the Google Sheet.
  * Note: Requires the doGet() function in Apps Script to be deployed correctly.
+ * IMPORTANT: The script MUST be deployed with "Who has access: Anyone".
  */
 export const fetchTickets = async (): Promise<SupportTicket[]> => {
   try {
     console.log("Fetching tickets from:", SCRIPT_URL);
+    
     const response = await fetch(SCRIPT_URL, {
       method: 'GET',
-      cache: 'no-store', // Ensure we don't get cached results
+      redirect: 'follow', // Crucial for Google Apps Script redirects
+      cache: 'no-store'
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP Error ${response.status}: ${errorText || 'Unknown error'}`);
+      throw new Error(`Server responded with ${response.status}`);
     }
 
     const data = await response.json();
@@ -50,9 +52,12 @@ export const fetchTickets = async (): Promise<SupportTicket[]> => {
 
     // Sort by most recent (assuming spreadsheet rows are in chronological order)
     return data.reverse();
-  } catch (error) {
-    console.error("Fetch Tickets Error Details:", error);
-    // Rethrow to allow UI to handle the error state
+  } catch (error: any) {
+    console.error("Detailed Fetch Error:", error);
+    // If we get "Failed to fetch", it's almost always a CORS/Access issue
+    if (error.message === 'Failed to fetch') {
+      throw new Error("CORS Access Denied. Ensure the Web App is deployed for 'Anyone'");
+    }
     throw error;
   }
 };
