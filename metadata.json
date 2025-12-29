@@ -1,0 +1,7 @@
+{
+  "name": "VDP & Access Card Support Portal",
+  "description": "A professional ticketing system for Video Door Phone and Door Access Card issues, featuring AI-powered instant troubleshooting and CSV data export capabilities.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
